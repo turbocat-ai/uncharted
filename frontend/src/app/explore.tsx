@@ -1,180 +1,200 @@
-import { Image } from 'expo-image';
-import { SymbolView } from 'expo-symbols';
-import { Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, SafeAreaView, Platform, ViewStyle, TextStyle } from 'react-native';
+import { Link } from 'expo-router';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { db, VisitedHex } from '../lib_render/db';
 
-import { ExternalLink } from '@/components/external-link';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Collapsible } from '@/components/ui/collapsible';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+export default function ExploreScreen() {
+  const [hexes, setHexes] = useState<VisitedHex[]>([]);
+  const [loading, setLoading] = useState(true);
 
-export default function TabTwoScreen() {
-  const safeAreaInsets = useSafeAreaInsets();
-  const insets = {
-    ...safeAreaInsets,
-    bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
-  };
-  const theme = useTheme();
+  useEffect(() => {
+    (async () => {
+      const data = await db.visitedHexes.toArray();
+      setHexes(data);
+      setLoading(false);
+    })();
+  }, []);
 
-  const contentPlatformStyle = Platform.select({
-    android: {
-      paddingTop: insets.top,
-      paddingLeft: insets.left,
-      paddingRight: insets.right,
-      paddingBottom: insets.bottom,
-    },
-    web: {
-      paddingTop: Spacing.six,
-      paddingBottom: Spacing.four,
-    },
-  });
+  // Resolution 10 H3 hexes are approximately 15,000 sq ft or ~1,400 sq meters
+  const totalHexes = hexes.length;
+  const totalAreaSqMeters = totalHexes * 1400;
+  const totalAreaSqMiles = (totalAreaSqMeters / 2589988).toFixed(3);
+
+  const mostVisitedCount = hexes.reduce((max, hex) => (hex.visitCount > max ? hex.visitCount : max), 0);
 
   return (
-    <ScrollView
-      style={[styles.scrollView, { backgroundColor: theme.background }]}
-      contentInset={insets}
-      contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
-      <ThemedView style={styles.container}>
-        <ThemedView style={styles.titleContainer}>
-          <ThemedText type="subtitle">Explore</ThemedText>
-          <ThemedText style={styles.centerText} themeColor="textSecondary">
-            This starter app includes example{'\n'}code to help you get started.
-          </ThemedText>
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        
+        {/* Header Navigation */}
+        <View style={styles.header}>
+          <Link href="/" asChild>
+            <TouchableOpacity style={styles.backButton}>
+              <MaterialCommunityIcons name="arrow-left" size={24} color="#F8FAFC" />
+            </TouchableOpacity>
+          </Link>
+          <Text style={styles.title}>Exploration Stats</Text>
+        </View>
 
-          <ExternalLink href="https://docs.expo.dev" asChild>
-            <Pressable style={({ pressed }) => pressed && styles.pressed}>
-              <ThemedView type="backgroundElement" style={styles.linkButton}>
-                <ThemedText type="link">Expo documentation</ThemedText>
-                <SymbolView
-                  tintColor={theme.text}
-                  name={{ ios: 'arrow.up.right.square', android: 'link', web: 'link' }}
-                  size={12}
-                />
-              </ThemedView>
-            </Pressable>
-          </ExternalLink>
-        </ThemedView>
+        {/* Primary Stat Card */}
+        <View style={styles.card}>
+          <MaterialCommunityIcons name="map-marker-path" size={32} color="#38BDF8" />
+          <Text style={styles.cardValue}>{totalHexes}</Text>
+          <Text style={styles.cardLabel}>Hexagons Unlocked</Text>
+        </View>
 
-        <ThemedView style={styles.sectionsWrapper}>
-          <Collapsible title="File-based routing">
-            <ThemedText type="small">
-              This app has two screens: <ThemedText type="code">src/app/index.tsx</ThemedText> and{' '}
-              <ThemedText type="code">src/app/explore.tsx</ThemedText>
-            </ThemedText>
-            <ThemedText type="small">
-              The layout file in <ThemedText type="code">src/app/_layout.tsx</ThemedText> sets up
-              the tab navigator.
-            </ThemedText>
-            <ExternalLink href="https://docs.expo.dev/router/introduction">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
+        {/* Grid Stats */}
+        <View style={styles.grid}>
+          <View style={[styles.card, styles.gridCard]}>
+            <MaterialCommunityIcons name="texture-box" size={28} color="#60A5FA" />
+            <Text style={styles.gridValue}>{totalAreaSqMiles} sq mi</Text>
+            <Text style={styles.cardLabel}>Area Revealed</Text>
+          </View>
 
-          <Collapsible title="Android, iOS, and web support">
-            <ThemedView type="backgroundElement" style={styles.collapsibleContent}>
-              <ThemedText type="small">
-                You can open this project on Android, iOS, and the web. To open the web version,
-                press <ThemedText type="smallBold">w</ThemedText> in the terminal running this
-                project.
-              </ThemedText>
-              <Image
-                source={require('@/assets/images/tutorial-web.png')}
-                style={styles.imageTutorial}
-              />
-            </ThemedView>
-          </Collapsible>
+          <View style={[styles.card, styles.gridCard]}>
+            <MaterialCommunityIcons name="repeat" size={28} color="#34D399" />
+            <Text style={styles.gridValue}>{mostVisitedCount}</Text>
+            <Text style={styles.cardLabel}>Top Hex Visits</Text>
+          </View>
+        </View>
 
-          <Collapsible title="Images">
-            <ThemedText type="small">
-              For static images, you can use the <ThemedText type="code">@2x</ThemedText> and{' '}
-              <ThemedText type="code">@3x</ThemedText> suffixes to provide files for different
-              screen densities.
-            </ThemedText>
-            <Image source={require('@/assets/images/react-logo.png')} style={styles.imageReact} />
-            <ExternalLink href="https://reactnative.dev/docs/images">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
+        {/* Discovery History */}
+        <View style={styles.historySection}>
+          <Text style={styles.sectionTitle}>Recent Discoveries</Text>
 
-          <Collapsible title="Light and dark mode components">
-            <ThemedText type="small">
-              This template has light and dark mode support. The{' '}
-              <ThemedText type="code">useColorScheme()</ThemedText> hook lets you inspect what the
-              user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-            </ThemedText>
-            <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
+          {loading ? (
+            <Text style={styles.emptyText}>Loading history...</Text>
+          ) : hexes.length === 0 ? (
+            <Text style={styles.emptyText}>No hexes unlocked yet. Go take a walk!</Text>
+          ) : (
+            hexes.slice(-5).reverse().map((item) => (
+              <View key={item.h3Index} style={styles.historyRow}>
+                <View>
+                  <Text style={styles.hexCode}>{item.h3Index}</Text>
+                  <Text style={styles.hexDate}>
+                    {new Date(item.firstVisitedAt).toLocaleDateString()} at{' '}
+                    {new Date(item.firstVisitedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                </View>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{item.visitCount} visits</Text>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
 
-          <Collapsible title="Animations">
-            <ThemedText type="small">
-              This template includes an example of an animated component. The{' '}
-              <ThemedText type="code">src/components/ui/collapsible.tsx</ThemedText> component uses
-              the powerful <ThemedText type="code">react-native-reanimated</ThemedText> library to
-              animate opening this hint.
-            </ThemedText>
-          </Collapsible>
-        </ThemedView>
-        {Platform.OS === 'web' && <WebBadge />}
-      </ThemedView>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
-    flex: 1,
-  },
-  contentContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
   container: {
-    maxWidth: MaxContentWidth,
-    flexGrow: 1,
-  },
-  titleContainer: {
-    gap: Spacing.three,
-    alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.six,
-  },
-  centerText: {
-    textAlign: 'center',
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  linkButton: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+    ...(Platform.OS === 'web' ? ({ minHeight: '100vh' } as unknown as ViewStyle) : {}),
+  } as ViewStyle,
+  scrollContent: {
+    padding: 20,
+  } as ViewStyle,
+  header: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.five,
-    justifyContent: 'center',
-    gap: Spacing.one,
     alignItems: 'center',
-  },
-  sectionsWrapper: {
-    gap: Spacing.five,
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
-  },
-  collapsibleContent: {
+    marginBottom: 24,
+  } as ViewStyle,
+  backButton: {
+    padding: 8,
+    marginRight: 12,
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
+  } as ViewStyle,
+  title: {
+    color: '#F8FAFC',
+    fontSize: 22,
+    fontWeight: 'bold',
+  } as TextStyle,
+  card: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 20,
     alignItems: 'center',
-  },
-  imageTutorial: {
-    width: '100%',
-    aspectRatio: 296 / 171,
-    borderRadius: Spacing.three,
-    marginTop: Spacing.two,
-  },
-  imageReact: {
-    width: 100,
-    height: 100,
-    alignSelf: 'center',
-  },
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: 16,
+  } as ViewStyle,
+  cardValue: {
+    color: '#F8FAFC',
+    fontSize: 36,
+    fontWeight: 'bold',
+    marginTop: 8,
+  } as TextStyle,
+  cardLabel: {
+    color: '#94A3B8',
+    fontSize: 14,
+    marginTop: 4,
+  } as TextStyle,
+  grid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  } as ViewStyle,
+  gridCard: {
+    flex: 1,
+    padding: 16,
+  } as ViewStyle,
+  gridValue: {
+    color: '#F8FAFC',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 8,
+  } as TextStyle,
+  historySection: {
+    marginTop: 12,
+  } as ViewStyle,
+  sectionTitle: {
+    color: '#F8FAFC',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+  } as TextStyle,
+  emptyText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontStyle: 'italic',
+  } as TextStyle,
+  historyRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1E293B',
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  } as ViewStyle,
+  hexCode: {
+    color: '#38BDF8',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontSize: 14,
+    fontWeight: '600',
+  } as TextStyle,
+  hexDate: {
+    color: '#64748B',
+    fontSize: 12,
+    marginTop: 2,
+  } as TextStyle,
+  badge: {
+    backgroundColor: '#0369A1',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  } as ViewStyle,
+  badgeText: {
+    color: '#E0F2FE',
+    fontSize: 12,
+    fontWeight: '500',
+  } as TextStyle,
 });

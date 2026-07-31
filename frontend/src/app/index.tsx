@@ -1,98 +1,184 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, Platform, ViewStyle, TextStyle } from 'react-native';
+import * as Location from 'expo-location';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Link } from 'expo-router';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { getH3Index, getHexBoundary, getFogOverlayPolygon, LatLng } from '../lib_render/h3';
+import { db, logHexVisit } from '../lib_render/db';
+import MapContainer from '../components/MapContainer';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+export default function MapScreen() {
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [isTracking, setIsTracking] = useState(false);
+  const [unlockedHexes, setUnlockedHexes] = useState<Map<string, LatLng[]>>(new Map());
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Load saved hexes from IndexedDB
+  useEffect(() => {
+    (async () => {
+      const savedHexes = await db.visitedHexes.toArray();
+      const hexMap = new Map<string, LatLng[]>();
+      savedHexes.forEach((item) => {
+        hexMap.set(item.h3Index, getHexBoundary(item.h3Index));
+      });
+      setUnlockedHexes(hexMap);
+    })();
+  }, []);
+
+  // Request location permissions
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setErrorMsg('Location permission denied');
+        return;
+      }
+      let current = await Location.getCurrentPositionAsync({});
+      setLocation(current);
+    })();
+  }, []);
+
+  // Location streaming and hex unlocking
+  useEffect(() => {
+    let subscription: Location.LocationSubscription | null = null;
+
+    if (isTracking) {
+      (async () => {
+        subscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 3000,
+            distanceInterval: 5,
+          },
+          async (newLocation) => {
+            setLocation(newLocation);
+            const { latitude, longitude } = newLocation.coords;
+            const h3Index = getH3Index(latitude, longitude);
+
+            await logHexVisit(h3Index);
+
+            setUnlockedHexes((prev) => {
+              if (prev.has(h3Index)) return prev;
+              const next = new Map(prev);
+              next.set(h3Index, getHexBoundary(h3Index));
+              return next;
+            });
+          }
+        );
+      })();
+    }
+
+    return () => {
+      if (subscription) subscription.remove();
+    };
+  }, [isTracking]);
+
+  const fogMask = getFogOverlayPolygon(unlockedHexes);
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+    <SafeAreaView style={styles.container}>
+      {/* Platform-Safe Map Rendering */}
+      <MapContainer
+        location={location}
+        isTracking={isTracking}
+        unlockedHexes={unlockedHexes}
+        fogMask={fogMask}
+      />
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+      {/* Floating HUD Header */}
+      <View style={styles.headerContainer}>
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>Fog Explorer</Text>
+          <Link href="/explore" asChild>
+            <TouchableOpacity style={styles.iconButton}>
+              <MaterialCommunityIcons name="compass" size={24} color="#38BDF8" />
+            </TouchableOpacity>
+          </Link>
+        </View>
+        <Text style={styles.headerSubtitle}>
+          {errorMsg ? errorMsg : `Revealed Hexes: ${unlockedHexes.size}`}
+        </Text>
+      </View>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+      {/* Controls */}
+      <View style={styles.controlBar}>
+        <TouchableOpacity
+          style={[styles.button, isTracking ? styles.buttonStop : styles.buttonStart]}
+          onPress={() => setIsTracking(!isTracking)}
+        >
+          <MaterialCommunityIcons
+            name={isTracking ? "pause" : "walk"}
+            size={24}
+            color="#FFFFFF"
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+          <Text style={styles.buttonText}>
+            {isTracking ? "Pause Walk" : "Start Exploring"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
+    backgroundColor: '#0f172a',
+    ...(Platform.OS === 'web' ? ({ height: '100vh' } as unknown as ViewStyle) : {}),
+  } as ViewStyle,
+  headerContainer: {
+    position: 'absolute',
+    top: 40,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+  } as ViewStyle,
+  headerRow: {
     flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
+  } as ViewStyle,
+  headerTitle: {
+    color: '#F8FAFC',
+    fontSize: 20,
+    fontWeight: 'bold',
+  } as TextStyle,
+  headerSubtitle: {
+    color: '#94A3B8',
+    fontSize: 14,
+    marginTop: 4,
+  } as TextStyle,
+  iconButton: {
+    padding: 4,
+  } as ViewStyle,
+  controlBar: {
+    position: 'absolute',
+    bottom: 40,
+    alignSelf: 'center',
+  } as ViewStyle,
+  button: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 30,
+    elevation: 5,
+  } as ViewStyle,
+  buttonStart: {
+    backgroundColor: '#2563EB',
+  } as ViewStyle,
+  buttonStop: {
+    backgroundColor: '#DC2626',
+  } as ViewStyle,
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  } as TextStyle,
 });
