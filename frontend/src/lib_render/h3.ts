@@ -61,6 +61,19 @@ export function getHexBoundary(h3Index: string): LatLng[] {
 }
 
 /**
+ * Returns ordered lat/lng pairs of hex centers to form continuous walking path lines.
+ */
+export function getHexCenterPoints(unlockedHexes: Map<string, LatLng[]>): LatLng[] {
+  const centers: LatLng[] = [];
+
+  unlockedHexes.forEach((_, h3Index) => {
+    centers.push(getHexCenter(h3Index));
+  });
+
+  return centers;
+}
+
+/**
  * Calculates the center point (latitude/longitude) of an H3 hex.
  * Useful for centering maps or placing markers inside a hex.
  *
