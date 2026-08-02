@@ -8,6 +8,8 @@ const router = express.Router();
 router.post('/register', async (req: express.Request, res: express.Response) => {
   const { username, email, password } = req.body;
 
+  console.log('Register req received', username,email, password)
+
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'Username, email, and password are required' });
   }
@@ -51,6 +53,8 @@ router.post('/register', async (req: express.Request, res: express.Response) => 
 
 router.post('/login', async (req: express.Request, res: express.Response) => {
   const { email, password } = req.body;
+
+  console.log('Login request received', email, password)
 
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
