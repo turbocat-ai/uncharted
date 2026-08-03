@@ -22,6 +22,10 @@
         "backgroundColor": "#0f172a"
       },
       "package": "com.uncharted.app"
-    }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-secure-store"
+    ]
   }
 }

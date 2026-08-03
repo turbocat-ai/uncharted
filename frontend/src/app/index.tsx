@@ -5,26 +5,35 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Link } from 'expo-router';
 
 import { getH3Index, getHexBoundary, getFogOverlayPolygon, LatLng } from '../lib_render/h3';
-import { db, logHexVisit } from '../lib_render/db';
+import { getAllVisitedHexes, logHexVisit } from '../lib_render/db';
+import { performSync } from '../lib_render/sync';
+import { useAuth } from '../components/AuthContext';
 import MapContainer from '../components/MapContainer';
 
 export default function MapScreen() {
+  const { isLoading, user } = useAuth();
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [unlockedHexes, setUnlockedHexes] = useState<Map<string, LatLng[]>>(new Map());
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load saved hexes from IndexedDB
+  // Load saved hexes only after AuthContext finishes loading and DB is ready
   useEffect(() => {
+    if (isLoading || !user) return;
+
     (async () => {
-      const savedHexes = await db.visitedHexes.toArray();
-      const hexMap = new Map<string, LatLng[]>();
-      savedHexes.forEach((item) => {
-        hexMap.set(item.h3Index, getHexBoundary(item.h3Index));
-      });
-      setUnlockedHexes(hexMap);
+      try {
+        const savedHexes = await getAllVisitedHexes();
+        const hexMap = new Map<string, LatLng[]>();
+        savedHexes.forEach((item) => {
+          hexMap.set(item.h3Index, getHexBoundary(item.h3Index));
+        });
+        setUnlockedHexes(hexMap);
+      } catch (err) {
+        console.error('Error loading hexes from local DB:', err);
+      }
     })();
-  }, []);
+  }, [isLoading, user]);
 
   // Request location permissions
   useEffect(() => {
@@ -43,7 +52,7 @@ export default function MapScreen() {
   useEffect(() => {
     let subscription: Location.LocationSubscription | null = null;
 
-    if (isTracking) {
+    if (isTracking && !isLoading) {
       (async () => {
         subscription = await Location.watchPositionAsync(
           {
@@ -57,6 +66,7 @@ export default function MapScreen() {
             const h3Index = getH3Index(latitude, longitude);
 
             await logHexVisit(h3Index);
+            performSync().catch(console.error);
 
             setUnlockedHexes((prev) => {
               if (prev.has(h3Index)) return prev;
@@ -72,13 +82,20 @@ export default function MapScreen() {
     return () => {
       if (subscription) subscription.remove();
     };
-  }, [isTracking]);
+  }, [isTracking, isLoading]);
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#fff' }}>Loading user database...</Text>
+      </SafeAreaView>
+    );
+  }
 
   const fogMask = getFogOverlayPolygon(unlockedHexes);
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Platform-Safe Map Rendering */}
       <MapContainer
         location={location}
         isTracking={isTracking}
@@ -86,7 +103,6 @@ export default function MapScreen() {
         fogMask={fogMask}
       />
 
-      {/* Floating HUD Header */}
       <View style={styles.headerContainer}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Fog Explorer</Text>
@@ -101,7 +117,6 @@ export default function MapScreen() {
         </Text>
       </View>
 
-      {/* Controls */}
       <View style={styles.controlBar}>
         <TouchableOpacity
           style={[styles.button, isTracking ? styles.buttonStop : styles.buttonStart]}

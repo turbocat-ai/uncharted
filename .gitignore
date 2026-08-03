@@ -1,3 +1,8 @@
+# Local temporary storage
+frontend/temp/
+*.db
+*.sqlite
+
 # Logs
 logs
 *.log
