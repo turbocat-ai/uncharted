@@ -1,53 +1,19 @@
 import { Router, type Request, type Response } from 'express';
 import { authenticateToken, type AuthenticatedRequest } from './auth.js';
 import db from '../db/pg_adaptor.js';
+import { type BatchSyncRequestBody, type HexRecord } from '../types/dataTypes.js'
 
 const router = Router();
 
 // Apply auth middleware to all routes in this router
 router.use(authenticateToken);
 
-export interface HexRecord {
-  h3_index: string;
-  visit_count: number;
-  first_visited_at: string;
-  last_visited_at: string;
-  updated_at: number;
-}
-
-export interface SyncItemPayload {
-  h3_index: string;
-  first_visited_at: string;
-  last_visited_at: string;
-  visit_count: number;
-}
-
-export interface SyncQueueChange {
-  queue_id: number;
-  entity_type: 'hex' | string;
-  entity_id: string;
-  operation: 'INSERT' | 'UPDATE' | string;
-  payload: SyncItemPayload;
-  client_timestamp: number;
-}
-
-export interface BatchSyncRequestBody {
-  changes: SyncQueueChange[];
-}
-
-interface UserHexesRow {
-  h3_index: string;
-  visit_count: string;
-  first_visited_at: string;
-  last_visited_at: string;
-  updated_at: string;
-}
 
 /**
  * GET /api/hexes
  * Fetches all unlocked hexes for the authenticated user to hydrate client SQLite cache on login.
  */
-router.get('/hexes', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.get('/get-hexes', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
 
@@ -70,16 +36,16 @@ router.get('/hexes', async (req: AuthenticatedRequest, res: Response): Promise<v
     const result = await db.query(query, [userId]);
 
     // Handle variations in pg drivers (pg Pool vs pg-promise vs custom wrapper)
-    const rows: UserHexesRow[] = Array.isArray(result) 
+    const rows: HexRecord[] = Array.isArray(result) 
     ? result 
     : (result?.rows || []);
 
     const formattedHexes: HexRecord[] = rows.map((row) => ({
     h3_index: row.h3_index,
-    visit_count: parseInt(row.visit_count, 10),
+    visit_count: row.visit_count,
     first_visited_at: row.first_visited_at,
     last_visited_at: row.last_visited_at,
-    updated_at: parseInt(row.updated_at, 10),
+    updated_at: row.updated_at,
     }));
 
     res.json(formattedHexes);
