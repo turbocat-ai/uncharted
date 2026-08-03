@@ -2,17 +2,22 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, SafeAreaView, Platform, ViewStyle, TextStyle } from 'react-native';
 import { Link } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { db, VisitedHex } from '../lib_render/db';
+import { getAllVisitedHexes, UserHex } from '../lib_render/db';
 
 export default function ExploreScreen() {
-  const [hexes, setHexes] = useState<VisitedHex[]>([]);
+  const [hexes, setHexes] = useState<UserHex[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const data = await db.visitedHexes.toArray();
-      setHexes(data);
-      setLoading(false);
+      try {
+        const data = await getAllVisitedHexes();
+        setHexes(data);
+      } catch (err) {
+        console.error('Failed to load exploration stats:', err);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
@@ -68,20 +73,23 @@ export default function ExploreScreen() {
           ) : hexes.length === 0 ? (
             <Text style={styles.emptyText}>No hexes unlocked yet. Go take a walk!</Text>
           ) : (
-            hexes.slice(-5).reverse().map((item) => (
-              <View key={item.h3Index} style={styles.historyRow}>
-                <View>
-                  <Text style={styles.hexCode}>{item.h3Index}</Text>
-                  <Text style={styles.hexDate}>
-                    {new Date(item.firstVisitedAt).toLocaleDateString()} at{' '}
-                    {new Date(item.firstVisitedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
+            hexes.slice(-5).reverse().map((item) => {
+              const dateObj = new Date(item.firstVisitedAt);
+              return (
+                <View key={item.h3Index} style={styles.historyRow}>
+                  <View>
+                    <Text style={styles.hexCode}>{item.h3Index}</Text>
+                    <Text style={styles.hexDate}>
+                      {dateObj.toLocaleDateString()} at{' '}
+                      {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  </View>
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{item.visitCount} visits</Text>
+                  </View>
                 </View>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{item.visitCount} visits</Text>
-                </View>
-              </View>
-            ))
+              );
+            })
           )}
         </View>
 

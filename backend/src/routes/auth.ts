@@ -1,14 +1,59 @@
-import express = require('express');
-import bcrypt = require('bcryptjs');
-import jwt = require('jsonwebtoken');
-const { db } = require('../db/pg_adaptor');
+import express, { type Request, type Response, type NextFunction } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import db from '../db/pg_adaptor.js';
 
 const router = express.Router();
 
-router.post('/register', async (req: express.Request, res: express.Response) => {
+/**
+ * Extended Express Request to attach authenticated user context
+ */
+export interface AuthenticatedRequest extends Request {
+  user?: {
+    id: number;
+    [key: string]: any;
+  };
+}
+
+/**
+ * Middleware: Authenticates requests using JWT Authorization header
+ * Expects header format: Authorization: Bearer <token>
+ */
+export const authenticateToken = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: No token provided' });
+  }
+
+  const secret = process.env.JWT_SECRET || 'fallback_secret';
+
+  jwt.verify(token, secret, (err: any, decoded: any) => {
+    if (err) {
+      return res.status(403).json({ error: 'Forbidden: Invalid or expired token' });
+    }
+
+    // Maps { userId: ... } from signed token payload to req.user.id
+    req.user = {
+      id: decoded.userId,
+    };
+
+    next();
+  });
+};
+
+/**
+ * POST /auth/register
+ */
+router.post('/register', async (req: Request, res: Response) => {
   const { username, email, password } = req.body;
 
-  console.log('Register req received', username,email, password)
+  console.log('Register req received:', username, email);
 
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'Username, email, and password are required' });
@@ -51,10 +96,13 @@ router.post('/register', async (req: express.Request, res: express.Response) => 
   }
 });
 
-router.post('/login', async (req: express.Request, res: express.Response) => {
+/**
+ * POST /auth/login
+ */
+router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
-  console.log('Login request received', email, password)
+  console.log('Login request received:', email);
 
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
@@ -94,4 +142,4 @@ router.post('/login', async (req: express.Request, res: express.Response) => {
   }
 });
 
-export = router;
+export default router;

@@ -1,5 +1,7 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { storage } from '../lib_render/storage';
+import { initUserDatabase } from '../lib_render/db';
+import { fetchRemoteHexes } from '../lib_render/sync';
 
 interface User {
   id: number;
@@ -38,8 +40,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const storedUser = await storage.getItem(USER_KEY);
 
         if (storedToken && storedUser) {
+          const parsedUser: User = JSON.parse(storedUser);
           setToken(storedToken);
-          setUser(JSON.parse(storedUser));
+          setUser(parsedUser);
+
+          // 1. Initialize user-specific SQLite database ({userId}.db)
+          await initUserDatabase(parsedUser.id);
+
+          // 2. Hydrate local DB with latest hexes from backend
+          fetchRemoteHexes().catch(console.error);
         }
       } catch (error) {
         console.error('Failed to load auth state from storage:', error);
@@ -55,8 +64,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await storage.setItem(TOKEN_KEY, newToken);
       await storage.setItem(USER_KEY, JSON.stringify(newUser));
+
+      // 1. Initialize DB for new user
+      await initUserDatabase(newUser.id);
+
       setToken(newToken);
       setUser(newUser);
+
+      // 2. Fetch remote hex history
+      fetchRemoteHexes().catch(console.error);
     } catch (error) {
       console.error('Error saving session:', error);
     }
