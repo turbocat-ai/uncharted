@@ -37,22 +37,27 @@ export async function populateCoordList(userId: number, coordsList: LatLng[]) {
             hexList.push(currHex)
         }
     }
-
+    let insertedCount = 0
     for (let i = 0; i < hexList.length; i++) {
         // Generate valid H3 index strings for testing
         const h3Index = hexList[i]
         
-        await db.none(
+        const isSuccess =  await db.oneOrNone(
         `INSERT INTO user_hexes (user_id, h3_index, visit_count, first_visited_at, last_visited_at, updated_at)
-        VALUES ($1, $2, $3, NOW(), NOW(), $4)
+        VALUES ($1, $2, $3, NOW(), NOW(), NOW())
         ON CONFLICT (user_id, h3_index) DO UPDATE
         SET visit_count = user_hexes.visit_count + 1,
             last_visited_at = NOW(),
-            updated_at = EXCLUDED.updated_at`,
-        [userId, h3Index, i + 1, Date.now()]
+            updated_at = EXCLUDED.updated_at
+        RETURNING 1`,
+        [userId, h3Index, i + 1]
         );
+        if(isSuccess == 1) {
+            insertedCount += 1
+        }
     }
     console.log('[Seed] Population complete.');
+    return insertedCount
 }
 
 // removes all hex ids and resets user_hexes table

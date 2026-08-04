@@ -27,133 +27,156 @@ let initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 /**
  * Initializes or switches to a user-specific SQLite database file ({userId}.db).
  */
-export async function initUserDatabase(userId: number): Promise<SQLite.SQLiteDatabase> {
-  if (currentDb && currentUserId === userId) {
-    return currentDb;
-  }
 
-  // Reuse existing promise if initialization is already in progress for this user
-  if (initPromise && currentUserId === userId) {
-    return initPromise;
+export async function initUserDatabase(userId: number): Promise<SQLite.SQLiteDatabase> {
+  if (currentDb && currentUserId === userId) return currentDb;
+
+  if (currentDb) {
+    try {
+      await currentDb.closeAsync();
+    } catch (e) {
+      console.warn('[DB] Resetting database connection...');
+    } finally {
+      currentDb = null;
+    }
   }
 
   currentUserId = userId;
+  const db = await SQLite.openDatabaseAsync(`${userId}.db`);
 
-  initPromise = (async () => {
-    const dbName = `${userId}.db`;
-    const db = await SQLite.openDatabaseAsync(dbName);
+  await db.execAsync(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS user_hexes (
+      user_id INTEGER NOT NULL,
+      h3_index TEXT NOT NULL,
+      visit_count INTEGER NOT NULL DEFAULT 1,
+      first_visited_at TEXT NOT NULL,
+      last_visited_at TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, h3_index)
+    );
 
-    await db.execAsync(`
-      PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS sync_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    client_timestamp INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  `);
 
-      CREATE TABLE IF NOT EXISTS user_hexes (
-        h3_index TEXT PRIMARY KEY NOT NULL,
-        visit_count INTEGER NOT NULL DEFAULT 1,
-        first_visited_at TEXT NOT NULL,
-        last_visited_at TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS sync_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entity_type TEXT NOT NULL,
-        entity_id TEXT NOT NULL,
-        operation TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        client_timestamp INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        retry_count INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_user_hexes_last_visited ON user_hexes(last_visited_at);
-    `);
-
-    currentDb = db;
-    console.log(`[DB] Switched SQLite connection to ${dbName}`);
-    return db;
-  })();
-
-  return initPromise;
+  currentDb = db;
+  return db;
 }
 
-/**
- * Ensures the database is initialized before executing queries.
- */
+export function getCurrentUserId(): number | null {
+  return currentUserId;
+}
+
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
-  if (currentDb) return currentDb;
-  if (initPromise) return await initPromise;
-
-  throw new Error('Database not initialized! Call initUserDatabase(userId) after login.');
+  if (!currentDb) {
+    throw new Error('[DB] Database not initialized! Call initUserDatabase(userId) after login.');
+  }
+  return currentDb;
 }
 
 /**
- * Logs a visit to an H3 hex using the user_hexes table schema.
- */
+ * Logs a visit to an H3 hex using the user_hexes table schema atomically.
+*/
 export async function logHexVisit(h3Index: string): Promise<boolean> {
   const db = await getDb();
+  const userId = getCurrentUserId(); // Ensure we get the active userId
+  if (!userId) {
+    throw new Error('[logHexVisit] Cannot log hex visit without an active userId.');
+  }
+
   const nowIso = new Date().toISOString();
   const nowMs = Date.now();
 
-  const existing = await db.getFirstAsync<{
-    h3_index: string;
-    visit_count: number;
-    first_visited_at: string;
-    last_visited_at: string;
-    updated_at: number;
-  }>('SELECT * FROM user_hexes WHERE h3_index = ?', [h3Index]);
-
   let isNewDiscovery = false;
-  let firstVisitedAt = nowIso;
-  let lastVisitedAt = nowIso;
-  let newVisitCount = 1;
-  let operation = 'INSERT';
 
-  if (existing) {
-    operation = 'UPDATE';
-    firstVisitedAt = existing.first_visited_at;
-    newVisitCount = existing.visit_count + 1;
+  try {
+    await db.withTransactionAsync(async () => {
+      // 1. Check existing record
+      const existing = await db.getFirstAsync<{
+        h3_index: string;
+        visit_count: number;
+        first_visited_at: string;
+      }>(
+        'SELECT h3_index, visit_count, first_visited_at FROM user_hexes WHERE user_id = ? AND h3_index = ?',
+        [userId, h3Index]
+      );
 
-    await db.runAsync(
-      `UPDATE user_hexes 
-       SET last_visited_at = ?, visit_count = ?, updated_at = ? 
-       WHERE h3_index = ?`,
-      [nowIso, newVisitCount, nowMs, h3Index]
-    );
-  } else {
-    isNewDiscovery = true;
+      let operation = 'INSERT';
+      let firstVisitedAt = nowIso;
+      let newVisitCount = 1;
 
-    await db.runAsync(
-      `INSERT INTO user_hexes (h3_index, visit_count, first_visited_at, last_visited_at, updated_at) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [h3Index, 1, nowIso, nowIso, nowMs]
-    );
+      if (existing) {
+        operation = 'UPDATE';
+        firstVisitedAt = existing.first_visited_at;
+        newVisitCount = existing.visit_count + 1;
+      } else {
+        isNewDiscovery = true;
+      }
+
+      // 2. Updated UPSERT with matching composite key constraint
+      await db.runAsync(
+        `INSERT INTO user_hexes (user_id, h3_index, visit_count, first_visited_at, last_visited_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, h3_index) DO UPDATE SET
+           visit_count = user_hexes.visit_count + 1,
+           last_visited_at = excluded.last_visited_at,
+           updated_at = excluded.updated_at`,
+        [userId, h3Index, 1, nowIso, nowIso, nowMs]
+      );
+
+      // 3. Queue for synchronization
+      const payloadData = {
+        user_id: userId,
+        h3_index: h3Index,
+        first_visited_at: firstVisitedAt,
+        last_visited_at: nowIso,
+        visit_count: newVisitCount,
+      };
+
+      await db.runAsync(
+        `INSERT INTO sync_queue (
+          user_id,
+          entity_type,
+          entity_id,
+          operation,
+          payload,
+          client_timestamp,
+          status,
+          retry_count,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          'hex',
+          h3Index,
+          operation,
+          JSON.stringify(payloadData),
+          nowMs,
+          'pending',
+          0,
+          nowIso,
+        ]
+      );
+    });
+
+    return isNewDiscovery;
+  } catch (error) {
+    console.error(`[logHexVisit Error] Failed to log visit for hex ${h3Index}:`, error);
+    throw error;
   }
-
-  const payloadData = {
-    h3_index: h3Index,
-    first_visited_at: firstVisitedAt,
-    last_visited_at: lastVisitedAt,
-    visit_count: newVisitCount,
-  };
-
-  await db.runAsync(
-    `INSERT INTO sync_queue (entity_type, entity_id, operation, payload, client_timestamp, status, retry_count, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      'hex',
-      h3Index,
-      operation,
-      JSON.stringify(payloadData),
-      nowMs,
-      'pending',
-      0,
-      nowIso,
-    ]
-  );
-
-  return isNewDiscovery;
 }
+
 
 /**
  * Retrieves all stored hex records from SQLite.
@@ -185,6 +208,7 @@ export async function clearExplorationHistory(): Promise<void> {
   await db.execAsync(`
     DELETE FROM user_hexes;
     DELETE FROM sync_queue;
+    VACUUM;
   `);
 }
 
@@ -204,7 +228,7 @@ export const syncQueue = {
       status: string;
       retry_count: number;
       created_at: string;
-    }>('SELECT * FROM sync_queue WHERE status = "pending" ORDER BY id ASC');
+    }>(`SELECT * FROM sync_queue WHERE status = 'pending' ORDER BY id ASC`);
 
     return rows.map((row) => ({
       id: row.id,
@@ -226,3 +250,12 @@ export const syncQueue = {
     await db.runAsync(`DELETE FROM sync_queue WHERE id IN (${placeholders})`, ids);
   },
 };
+
+
+if (typeof window !== 'undefined') {
+  (window as any).clearDb = async () => {
+    const db = await getDb();
+    await db.execAsync('DELETE FROM user_hexes; DELETE FROM sync_queue; VACUUM;');
+    console.log('✅ SQLite cache cleared inline from browser console!');
+  };
+}
