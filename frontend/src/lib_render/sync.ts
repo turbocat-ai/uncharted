@@ -58,7 +58,7 @@ export async function fetchRemoteHexes(): Promise<void> {
         last_visited_at: string;
         updated_at: number;
       }>
-    >('/data/hexes');
+    >('/data/get-hexes');
 
     const db = getDb();
 
