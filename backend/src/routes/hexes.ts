@@ -84,7 +84,9 @@ router.post('/sync', async (req: AuthenticatedRequest, res: Response): Promise<v
 
       if (entity_type === 'hex') {
         const { h3_index, first_visited_at, last_visited_at, visit_count } = payload;
-
+        const updatedAtDate = typeof client_timestamp === 'number' 
+        ? new Date(client_timestamp) 
+        : client_timestamp;
         const upsertQuery = `
           INSERT INTO user_hexes (user_id, h3_index, visit_count, first_visited_at, last_visited_at, updated_at)
           VALUES ($1, $2, $3, $4, $5, $6)
@@ -101,7 +103,7 @@ router.post('/sync', async (req: AuthenticatedRequest, res: Response): Promise<v
           visit_count,
           first_visited_at,
           last_visited_at,
-          client_timestamp,
+          updatedAtDate,
         ]);
 
         syncedIds.push(queue_id);
