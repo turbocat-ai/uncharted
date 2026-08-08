@@ -9,6 +9,7 @@ const router = Router();
 router.use(authenticateToken);
 
 
+
 /**
  * GET /api/hexes
  * Fetches all unlocked hexes for the authenticated user to hydrate client SQLite cache on login.
